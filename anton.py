@@ -1,11 +1,22 @@
-async def anton(event):
-    if not event.text.startswith(".anton"):
-        return
+from .. import loader, utils
 
-    await event.message.edit("my def is @seys666228")
+@loader.tds
+class AntonMod(loader.Module):
+    """
+    Replaces the message with "my def is @seys666228" when the .anton command is used.
+    """
+    strings = {
+        "name": "AntonMod"
+    }
 
-async def load(client):
-    client.add_event_handler(anton)
+    async def antonCmd(self, message):
+        """
+        .anton command handler
+        """
+        await utils.answer(message, "my def is @seys666228")
 
-async def unload(client):
-    client.remove_event_handler(anton)
+    def __init__(self):
+        self.name = self.strings["name"]
+
+    async def client_ready(self, client, db):
+        self.client = client
