@@ -1,22 +1,16 @@
+# -*- coding: utf-8 -*-
 from .. import loader, utils
+
 
 @loader.tds
 class AntonMod(loader.Module):
-    """
-    Replaces the message with "my def is @seys666228" when the .anton command is used.
-    """
-    strings = {
-        "name": "AntonMod"
-    }
+    """Отвечает &laquo;my def is @seys666228&raquo; со спойлером"""
 
-    async def antonCmd(self, message):
-        """
-        .anton command handler
-        """
-        await utils.answer(message, "my def is @seys666228")
+    strings = {"name": "AntonMod"}
 
-    def __init__(self):
-        self.name = self.strings["name"]
-
-    async def client_ready(self, client, db):
-        self.client = client
+    async def antoncmd(self, message):
+        # Отправляем сообщение, оборачивая ник в спойлер через HTML-разметку
+        await utils.answer(
+            message,
+            "my def is <tg-spoiler>@seys666228</tg-spoiler>",
+            parse_mode="html",
