@@ -15,6 +15,14 @@ class CubeSpamMod(loader.Module):
         self.task = None
         self.is_active = False
         self.interval = self.config["default_interval"]
+        self.emoji_map = {
+            1: "🎲 1️⃣",
+            2: "🎲 2️⃣",
+            3: "🎲 3️⃣",
+            4: "🎲 4️⃣",
+            5: "🎲 5️⃣",
+            6: "🎲 6️⃣"
+        }
 
     async def client_ready(self, client, db):
         self._db = db
@@ -23,9 +31,10 @@ class CubeSpamMod(loader.Module):
     async def spam_cube(self):
         while self.is_active:
             try:
+                num = random.randint(1, 6)
                 await self._client.send_message(
                     self._db.get("CubeSpam", "chat_id"),
-                    f"/roll {random.randint(1, 6)}"
+                    self.emoji_map[num]
                 )
                 await asyncio.sleep(self.interval)
             except Exception as e:
