@@ -206,13 +206,16 @@ class HikkaGuardianMod(loader.Module):
             await utils.answer(message, f"❌ Ошибка: {str(e)}")
 
     async def _show_settings(self, message: Message):
+        """Исправленный метод показа настроек"""
         settings = []
-        for key, value in self.config.get_attrs().items():
-            desc = value.doc if hasattr(value, "doc") else "-"
+        for key in self.config._config:  # Получаем ключи напрямую
+            value = self.config[key]
+            doc = self.config.get_doc(key)  # Получаем описание параметра
             settings.append(
-                f"• <b>{key}</b>: <code>{self.config[key]}</code>\n"
-                f"<i>{desc}</i>\n"
+                f"• <b>{key}</b>: <code>{value}</code>\n"
+                f"<i>{doc}</i>\n"
             )
+            
         await utils.answer(
             message,
             f"⚙️ <b>Настройки HikkaGuardian</b>\n\n" + "\n".join(settings),
