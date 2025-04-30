@@ -5,67 +5,63 @@ import asyncio
 import logging
 
 @loader.tds
-class CubeSpamMod(loader.Module):
-    """Спам эмодзи-кубиками с настраиваемым интервалом"""
-    strings = {"name": "CubeSpam"}
-    
-    __version__ = (1, 0, 2)
+class UserCubeSpam(loader.Module):
+    """Спам кубиками от вашего аккаунта"""
+    strings = {"name": "UserCubeSpam"}
     
     def __init__(self):
         self.config = loader.ModuleConfig(
-            loader.ConfigValue(
-                "interval",
-                10,
-                "Интервал отправки в секундах",
-                validator=loader.validators.Integer(minimum=3)
-            )
+            "interval", 
+            10,
+            "Интервал отправки в секундах",
+            validator=loader.validators.Integer(minimum=5)
         )
         self.task = None
         self.log = logging.getLogger(__name__)
-        self.emoji_cubes = [
-            "🎲 1️⃣", "🎲 2️⃣", "🎲 3️⃣",
-            "🎲 4️⃣", "🎲 5️⃣", "🎲 6️⃣"
-        ]
+        self.cubes = ["🎲 1️⃣", "🎲 2️⃣", "🎲 3️⃣", "🎲 4️⃣", "🎲 5️⃣", "🎲 6️⃣"]
 
     async def client_ready(self, client, db):
-        self._client = client
+        self._client = client  # Клиент вашего аккаунта
         self._db = db
 
-    async def spam_task(self):
+    async def cube_loop(self):
+        """Основной цикл отправки"""
         while True:
             try:
                 await self._client.send_message(
-                    self.chat_id,
-                    random.choice(self.emoji_cubes)
-                )
+                    self.target_chat,
+                    random.choice(self.cubes)
                 await asyncio.sleep(self.config["interval"])
+                
             except Exception as e:
-                self.log.error(f"Ошибка: {e}", exc_info=True)
+                self.log.error(f"Ошибка: {e}")
+                await self.stop_spam()
                 break
 
     @loader.command
-    async def cubestart(self, message: Message):
-        """Запустить спам кубиками в текущем чате"""
-        if self.task and not self.task.done():
-            await utils.answer(message, "🚫 Спам уже запущен!")
+    async def cubego(self, message: Message):
+        """Запустить спам в этом чате"""
+        if self.task:
+            await utils.answer(message, "❌ Спам уже запущен!")
             return
             
-        self.chat_id = message.chat_id
-        self.task = asyncio.create_task(self.spam_task())
+        self.target_chat = message.chat_id  # Отправка в текущий чат
+        self.task = asyncio.create_task(self.cube_loop())
         await utils.answer(
             message,
-            f"🎲 Спам запущен с интервалом {self.config['interval']} сек\n"
-            "Для остановки используй команду .cubestop"
+            f"✅ Кубики запущены!\n"
+            f"Интервал: {self.config['interval']} сек\n"
+            f"Остановка: .cubestop"
         )
 
     @loader.command
     async def cubestop(self, message: Message):
         """Остановить спам"""
-        if self.task and not self.task.done():
+        if self.task:
             self.task.cancel()
             await utils.answer(message, "🛑 Спам остановлен")
         else:
-            await utils.answer(message, "ℹ️ Спам не был запущен")
+            await utils.answer(message, "⚠️ Спам не активен")
 
     async def on_unload(self):
         if self.task:
