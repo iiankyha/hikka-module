@@ -13,8 +13,7 @@ class UserCubeSpam(loader.Module):
         self.config = loader.ModuleConfig(
             "interval", 
             10,
-            "Интервал отправки в секундах",
-            validator=loader.validators.Integer(minimum=5)
+            "Интервал отправки в секундах"
         )
         self.task = None
         self.log = logging.getLogger(__name__)
@@ -25,18 +24,15 @@ class UserCubeSpam(loader.Module):
         self._db = db
 
     async def cube_loop(self):
-        """Основной цикл отправки"""
         while True:
             try:
-                # Исправлено: добавлена закрывающая скобка
                 await self._client.send_message(
                     self.target_chat,
                     random.choice(self.cubes)
-                )  # <-- Вот здесь была ошибка
+                )
                 await asyncio.sleep(self.config["interval"])
-                
             except Exception as e:
-                self.log.error(f"Ошибка: {e}")
+                self.log.error(f"Ошибка: {str(e)}")
                 await self.stop_spam()
                 break
 
@@ -47,23 +43,30 @@ class UserCubeSpam(loader.Module):
             await utils.answer(message, "❌ Спам уже запущен!")
             return
             
+        # Ручная валидация интервала
+        try:
+            interval = int(utils.get_args_raw(message)) if utils.get_args_raw(message) else self.config["interval"]
+            if interval < 5:
+                await utils.answer(message, "🚫 Минимальный интервал - 5 секунд!")
+                return
+        except ValueError:
+            await utils.answer(message, "⚠️ Неверный интервал! Использую 10 сек")
+            interval = 10
+            
         self.target_chat = message.chat_id
+        self.config["interval"] = interval
         self.task = asyncio.create_task(self.cube_loop())
-        await utils.answer(
-            message,
-            f"✅ Кубики запущены!\n"
-            f"Интервал: {self.config['interval']} сек\n"
-            f"Остановка: .cubestop"
-        )
+        await utils.answer(message, f"✅ Спам запущен!\nИнтервал: {interval} сек")
 
     @loader.command
     async def cubestop(self, message: Message):
         """Остановить спам"""
         if self.task:
             self.task.cancel()
+            self.task = None
             await utils.answer(message, "🛑 Спам остановлен")
         else:
-            await utils.answer(message, "⚠️ Спам не активен")
+            await utils.answer(message, "ℹ️ Спам не активен")
 
     async def on_unload(self):
         if self.task:
