@@ -1,10 +1,10 @@
 from .. import loader, utils
-import random
+import asyncio
 
 @loader.tds
-class TrollMod(loader.Module):
-    """Модуль для троллинга случайными сообщениями"""
-    strings = {"name": "TrollMod"}
+class TrollSpamMod(loader.Module):
+    """Отправка всех фраз с интервалом 0.8 секунды"""
+    strings = {"name": "TrollSpam"}
     
     async def client_ready(self, client, db):
         self.insults = [
@@ -34,7 +34,7 @@ class TrollMod(loader.Module):
             "ты чурка ебаная",
             "сосала ты мой хуй",
             "ты сынок зека ебаного",
-            "ты чего там чурка ебаная соси",
+            "ты чего там чурка ебанаую соси",
             "оторвался с твоей мамашей",
             "изнасиловал тебе еблище",
             "ну же нищий сын шл соси мне",
@@ -532,7 +532,7 @@ class TrollMod(loader.Module):
             "я тебе мать шлюху хуем ебу",
             "тёлка ты ебаная соси давай мне хуй",
             "я твое слабое ебало тут ебу",
-            "ты косорылая тёлка сцасеш в слезах",
+            " ты косорылая тёлка сцасеш в слезах",
             "слыш соси давай",
             "тёлка ты косорылая ебали тя",
             "хуй на тёлка ебучая",
@@ -888,6 +888,7 @@ class TrollMod(loader.Module):
 
     @loader.command()
     async def troll(self, message):
-        """- отправить случайное оскорбительное сообщение"""
-        insult = random.choice(self.insults)
-        await utils.answer(message, insult)
+        """- запустить спам фразами"""
+        for insult in self.insults:
+            await message.respond(insult)
+            await asyncio.sleep(0.8)  # Интервал 0.8 секунды между сообщениями
