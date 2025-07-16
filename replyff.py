@@ -1,8 +1,8 @@
 from hikkatl.types import Message
 from hikkatl.utils import get_display_name
 from hikkatl.errors import UserIdInvalidError
-from hikkatl import functions
 from .. import loader, utils
+import time
 
 @loader.tds
 class AutoReplyLockMod(loader.Module):
@@ -15,11 +15,14 @@ class AutoReplyLockMod(loader.Module):
         "user_unlocked": "✅ Пользователь {} удалён из списка",
         "not_in_list": "❌ Пользователь не в списке отслеживания",
         "lock_list": "📝 Список отслеживаемых пользователей:\n\n",
-        "list_empty": "❌ Список отслеживания пуст"
+        "list_empty": "❌ Список отслеживания пуст",
+        "cooldown": "⏱️ Сообщение было отправлено слишком быстро после предыдущего"
     }
 
     def __init__(self):
         self.locked_users = {}
+        self.last_message_time = {}
+        self.cooldown = 1.0  # Минимальный интервал между сообщениями (в секундах)
 
     async def client_ready(self, client, db):
         self.db = db
@@ -114,21 +117,45 @@ class AutoReplyLockMod(loader.Module):
 
     @loader.watcher()
     async def watcher(self, message: Message):
-        """Отслеживание сообщений"""
+        """Отслеживание сообщений с минимальной задержкой"""
         # Игнорируем служебные сообщения и свои собственные
-        if not isinstance(message, Message) or message.out:
+        if not isinstance(message, Message) or message.out or not message.sender_id:
             return
 
         chat_id = utils.get_chat_id(message)
         user_id = message.sender_id
         
-        # Проверяем что это пользователь (не бот) и есть ID отправителя
-        if not user_id or user_id < 0:
+        # Игнорируем ботов и каналы
+        if user_id <= 0:
             return
 
-        # Проверяем наличие пользователя в списке для этого чата
-        if (str(chat_id) in self.locked_users and 
-            str(user_id) in self.locked_users[str(chat_id)]):
-            text = self.locked_users[str(chat_id)][str(user_id)]
-            # Отправляем ответ с упоминанием
-            await message.reply(text)
+        # Проверяем наличие пользователя в списке
+        chat_str = str(chat_id)
+        user_str = str(user_id)
+        
+        if chat_str not in self.locked_users or user_str not in self.locked_users[chat_str]:
+            return
+
+        # Проверка кулдауна
+        current_time = time.time()
+        last_time = self.last_message_time.get(user_str, 0)
+        
+        if current_time - last_time < self.cooldown:
+            # Можно добавить логирование, но не отправляем сообщение
+            return
+            
+        self.last_message_time[user_str] = current_time
+
+        # Получаем текст ответа
+        text = self.locked_users[chat_str][user_str]
+        
+        # Отправляем ответ напрямую через клиент (минимальная задержка)
+        try:
+            await message.client.send_message(
+                entity=chat_id,
+                message=text,
+                reply_to=message.id
+            )
+        except Exception as e:
+            # Логируем ошибку, но не прерываем работу
+            pass
