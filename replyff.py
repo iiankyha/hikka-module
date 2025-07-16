@@ -5,7 +5,7 @@ from hikkatl import functions
 from .. import loader, utils
 
 @loader.tds
-class AutoReplyMod(loader.Module):
+class AutoReplyLockMod(loader.Module):
     """Автоматический ответ на сообщения выбранных пользователей"""
     strings = {
         "name": "AutoReplyLock",
@@ -17,6 +17,9 @@ class AutoReplyMod(loader.Module):
         "lock_list": "📝 Список отслеживаемых пользователей:\n\n",
         "list_empty": "❌ Список отслеживания пуст"
     }
+
+    def __init__(self):
+        self.locked_users = {}
 
     async def client_ready(self, client, db):
         self.db = db
@@ -42,7 +45,7 @@ class AutoReplyMod(loader.Module):
             return
 
         user_id = user.id
-        chat_id = message.chat_id
+        chat_id = utils.get_chat_id(message)
 
         if str(chat_id) not in self.locked_users:
             self.locked_users[str(chat_id)] = {}
@@ -60,19 +63,24 @@ class AutoReplyMod(loader.Module):
 
     async def unlockcmd(self, message: Message):
         """Удалить пользователя из списка отслеживания. Использование: .unlock @username"""
-        user = await utils.get_target(message)
-        if not user:
+        args = utils.get_args_raw(message)
+        if not args:
+            await utils.answer(message, self.strings("no_args"))
+            return
+
+        try:
+            user = await message.client.get_entity(args.strip())
+        except (TypeError, ValueError, UserIdInvalidError):
             await utils.answer(message, self.strings("user_not_found"))
             return
 
-        chat_id = message.chat_id
+        chat_id = utils.get_chat_id(message)
         user_id = user.id
         
         if (str(chat_id) in self.locked_users and 
             str(user_id) in self.locked_users[str(chat_id)]):
             del self.locked_users[str(chat_id)][str(user_id)]
             
-            # Удалить чат из словаря если пустой
             if not self.locked_users[str(chat_id)]:
                 del self.locked_users[str(chat_id)]
                 
@@ -88,7 +96,7 @@ class AutoReplyMod(loader.Module):
 
     async def locklistcmd(self, message: Message):
         """Показать список отслеживаемых пользователей"""
-        chat_id = message.chat_id
+        chat_id = utils.get_chat_id(message)
         if str(chat_id) not in self.locked_users or not self.locked_users[str(chat_id)]:
             await utils.answer(message, self.strings("list_empty"))
             return
@@ -107,13 +115,20 @@ class AutoReplyMod(loader.Module):
     @loader.watcher()
     async def watcher(self, message: Message):
         """Отслеживание сообщений"""
-        if not message.sender_id or not message.out:
+        # Игнорируем служебные сообщения и свои собственные
+        if not isinstance(message, Message) or message.out:
             return
 
-        chat_id = message.chat_id
+        chat_id = utils.get_chat_id(message)
         user_id = message.sender_id
         
+        # Проверяем что это пользователь (не бот) и есть ID отправителя
+        if not user_id or user_id < 0:
+            return
+
+        # Проверяем наличие пользователя в списке для этого чата
         if (str(chat_id) in self.locked_users and 
             str(user_id) in self.locked_users[str(chat_id)]):
             text = self.locked_users[str(chat_id)][str(user_id)]
-            await utils.answer(message, text)
+            # Отправляем ответ с упоминанием
+            await message.reply(text)
