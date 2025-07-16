@@ -17,7 +17,8 @@ class AutoReplyLockMod(loader.Module):
         "lock_list": "📝 Список отслеживаемых пользователей в чате {}:\n\n",
         "list_empty": "❌ Список отслеживания пуст для этого чата",
         "cooldown": "⏱️ Сообщение было отправлено слишком быстро после предыдущего",
-        "reply_required": "❌ Ответьте на сообщение пользователя или укажите @username"
+        "reply_required": "❌ Ответьте на сообщение пользователя или укажите @username",
+        "no_text": "❌ Не указан текст ответа"
     }
 
     def __init__(self):
@@ -39,21 +40,28 @@ class AutoReplyLockMod(loader.Module):
 
     async def lockcmd(self, message: Message):
         """Добавить пользователя в список отслеживания. Использование: .lock [@username|ответ] <текст>"""
-        args = utils.get_args_raw(message)
-        
         # Если есть ответ на сообщение
         if message.is_reply:
             reply = await message.get_reply_message()
-            user = reply.sender
-            
-            # Если текст ответа не указан, используем весь текст сообщения
-            if not args:
-                await self._notify(self.strings("no_args"))
+            if not reply.sender_id:
+                await self._notify(self.strings("user_not_found"))
                 return
                 
-            text = args
+            # Получаем полную информацию о пользователе
+            try:
+                user = await reply.get_sender()
+            except ValueError:
+                await self._notify(self.strings("user_not_found"))
+                return
+                
+            # Текст ответа - это весь текст после команды
+            text = utils.get_args_raw(message)
+            if not text:
+                await self._notify(self.strings("no_text"))
+                return
         else:
             # Обработка без ответа на сообщение
+            args = utils.get_args_raw(message)
             if not args:
                 await self._notify(self.strings("reply_required"))
                 return
@@ -62,7 +70,7 @@ class AutoReplyLockMod(loader.Module):
                 # Пытаемся разделить пользователя и текст
                 user_part, text = args.split(maxsplit=1)
             except ValueError:
-                await self._notify(self.strings("no_args"))
+                await self._notify(self.strings("no_text"))
                 return
                 
             try:
@@ -97,7 +105,15 @@ class AutoReplyLockMod(loader.Module):
         # Если есть ответ на сообщение
         if message.is_reply:
             reply = await message.get_reply_message()
-            user = reply.sender
+            if not reply.sender_id:
+                await self._notify(self.strings("user_not_found"))
+                return
+                
+            try:
+                user = await reply.get_sender()
+            except ValueError:
+                await self._notify(self.strings("user_not_found"))
+                return
         else:
             args = utils.get_args_raw(message)
             if not args:
