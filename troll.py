@@ -5,11 +5,12 @@ from hikkatl.errors import FloodWaitError
 
 @loader.tds
 class TrollSpamMod(loader.Module):
-    """Улучшенный спам фразами с обработкой FloodWait"""
-    strings = {"name": "TrollSpamPro"}
+    """Спам фразами с автоматическим восстановлением"""
+    strings = {"name": "TrollSpam"}
     
     async def client_ready(self, client, db):
-        self.insults = [
+        # Исходный набор всех фраз
+        self.all_phrases = [
             "ебашу те мамашу тут хером своим дура ты",
             "соси мой хуй ишак",
             "ебашил те мамашу",
@@ -27,7 +28,7 @@ class TrollSpamMod(loader.Module):
             "изтрахал тя",
             "терпила ты ебаная",
             "хуй ты мне сосала",
-            "чурка ты ебаная соси",
+            "чурка ты ебанаую соси",
             "ну же соси",
             "я же твою маманьку тут ебал",
             "ты терпила ебаная ты сосала мне",
@@ -64,7 +65,7 @@ class TrollSpamMod(loader.Module):
             "ебал тя так то хуем своим",
             "ты отсосница соси",
             "сломан твой череп из за моего хуя",
-            " ты мне сасала здесь",
+            "ты мне сасала здесь",
             "я тебе мать ебу",
             "кривоногий ты хули от моего хуя убегаешь",
             "ноунейм я ломаю твои кости хером",
@@ -174,7 +175,7 @@ class TrollSpamMod(loader.Module):
             "ало соси мне косоглазая",
             "ну я тя своим хуем ебал по факту",
             "мой член тебе мамашу убил",
-            "я твоей матери ебало сломал своим членом",
+            " я твоей матери ебало сломал своим членом",
             "принципиально ебу ту",
             "долбаеб азаз ебал тя",
             "ты ноу нейм соси давай",
@@ -302,7 +303,7 @@ class TrollSpamMod(loader.Module):
             "я же тебе мать ебу тёлка ты ебаная",
             "твоя мамочка просит мой хуй чтобы он ее вытрахал",
             "ты же нищий сын шлюхи тут сосешь сидишь",
-            "я же те ебальник своим хуем унижу тут",
+            " я же те ебальник своим хуем унижу тут",
             "я тебе мать тут ебу",
             "слыш твой батек куколд дрочит на то как я тебе мать ебу",
             "ты же сын терпилы соси тут мне",
@@ -500,7 +501,7 @@ class TrollSpamMod(loader.Module):
             "я же твою мать хуем дополняю",
             "я тебе мамашу рву членом",
             "косорылая дура че воешь в хуй",
-            " я же твое косое ебало ебу",
+            "я же твое косое ебало ебу",
             "ноу нейм в слезах от хуя убегаешь",
             "я твое ебало тут хуем порву",
             "слышеш ты дите слабой твари ебали тя",
@@ -887,61 +888,76 @@ class TrollSpamMod(loader.Module):
             "ты щас мне тут косовытраханный сынок медленного хуесоса тут блеть будешь чтобы я хоть как то не взъебашировал твое детское кривое еблище узкоеблый сынок чернушки",
             "унитазноблевотный сын черновытраханной шалавы внаутре переломив твое отсталое еблище встал и обоссал тебя недоразвитого сынка дегройднопоставленной оттраханной шлюхи"
         ]
+        
+        # Рабочий список
+        self.insults = self.all_phrases.copy()
         self.tasks = []
         self.active = False
 
     async def send_message(self, message, text):
-        """Отправка сообщения с обработкой FloodWait"""
+        """Отправка с обработкой FloodWait"""
         try:
             await message.respond(text)
             return True
         except FloodWaitError as e:
-            wait_time = e.seconds + random.uniform(1.0, 3.0)
-            await asyncio.sleep(wait_time)
+            wait = e.seconds + random.uniform(0.5, 2.0)
+            await asyncio.sleep(wait)
             return False
         except Exception:
             return False
 
     async def spam_task(self, message):
-        """Асинхронная задача для отправки сообщений"""
+        """Задача отправки сообщений"""
         while self.active and self.insults:
-            # Случайный размер пачки сообщений
-            batch_size = random.randint(3, 7)
+            # Случайный размер пачки
+            batch_size = random.randint(2, 5)
             batch = []
             for _ in range(min(batch_size, len(self.insults))):
-                if self.insults:
-                    batch.append(self.insults.pop(0))
+                batch.append(self.insults.pop(0))
             
-            # Отправляем пачку сообщений
+            # Отправка пачки
             for text in batch:
                 if not self.active:
-                    break
-                success = await self.send_message(message, text)
-                if not success and self.active:
-                    self.insults.insert(0, text)  # Возвращаем обратно в очередь
+                    return
+                
+                # Пытаемся отправить с повтором при ошибке
+                for _ in range(3):  # 3 попытки
+                    if not self.active:
+                        return
+                    if await self.send_message(message, text):
+                        break
+                    await asyncio.sleep(0.5)
+                else:
+                    # Если не удалось отправить после 3 попыток
+                    self.insults.append(text)
                 
                 # Случайная задержка между сообщениями
-                delay = random.uniform(0.05, 0.2)
-                await asyncio.sleep(delay)
+                await asyncio.sleep(random.uniform(0.1, 0.3))
             
             # Задержка между пачками
             if self.active and self.insults:
-                await asyncio.sleep(random.uniform(0.3, 0.8))
+                await asyncio.sleep(random.uniform(0.5, 1.0))
 
     @loader.command()
     async def troll(self, message):
-        """- запустить улучшенный спам"""
+        """- запустить спам"""
         if self.active:
             await utils.answer(message, "<b>Спам уже запущен!</b>")
             return
         
+        # Восстановление списка фраз
+        self.insults = self.all_phrases.copy()
         self.active = True
         total = len(self.insults)
         await utils.answer(message, f"<b>♻️ Запускаю спам ({total} фраз)...</b>")
         
-        # Запускаем 3 параллельных задачи для отправки
-        self.tasks = [asyncio.create_task(self.spam_task(message)) for _ in range(3)]
+        # Запуск 2 параллельных задач
+        self.tasks = [
+            asyncio.create_task(self.spam_task(message)),
+            asyncio.create_task(self.spam_task(message))
+        ]
         
+        # Ожидание завершения
         try:
             await asyncio.gather(*self.tasks)
         except Exception:
@@ -949,8 +965,8 @@ class TrollSpamMod(loader.Module):
         finally:
             if self.active:
                 self.active = False
-                sent_count = total - len(self.insults)
-                await message.respond(f"<b>✅ Спам завершен! Отправлено {sent_count}/{total} фраз</b>")
+                sent = total - len(self.insults)
+                await message.respond(f"<b>✅ Спам завершен! Отправлено {sent}/{total}</b>")
 
     @loader.command()
     async def trollstop(self, message):
@@ -962,11 +978,10 @@ class TrollSpamMod(loader.Module):
         self.active = False
         for task in self.tasks:
             task.cancel()
-        
         await utils.answer(message, f"<b>⛔ Спам остановлен! Осталось {len(self.insults)} фраз</b>")
 
     async def on_unload(self):
-        """При выгрузке модуля останавливаем спам"""
+        """Остановка при выгрузке модуля"""
         self.active = False
         for task in self.tasks:
             task.cancel()
