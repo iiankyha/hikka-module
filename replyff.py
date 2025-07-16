@@ -14,37 +14,44 @@ class AutoReplyLockMod(loader.Module):
         "no_args": "❌ Укажите пользователя и текст ответа",
         "user_unlocked": "✅ Пользователь {} удалён из списка",
         "not_in_list": "❌ Пользователь не в списке отслеживания",
-        "lock_list": "📝 Список отслеживаемых пользователей:\n\n",
-        "list_empty": "❌ Список отслеживания пуст",
+        "lock_list": "📝 Список отслеживаемых пользователей в чате {}:\n\n",
+        "list_empty": "❌ Список отслеживания пуст для этого чата",
         "cooldown": "⏱️ Сообщение было отправлено слишком быстро после предыдущего"
     }
 
     def __init__(self):
         self.locked_users = {}
         self.last_message_time = {}
-        self.cooldown = 1.0  # Минимальный интервал между сообщениями (в секундах)
+        self.cooldown = 1.0  # Минимальный интервал между сообщениями
+        self._me = None  # Будет установлено в client_ready
 
     async def client_ready(self, client, db):
         self.db = db
+        self._client = client
         self.locked_users = self.db.get("AutoReplyLock", "locked", {})
+        self._me = (await client.get_me()).id
+
+    async def _notify(self, text: str):
+        """Отправляет уведомление в избранное"""
+        await self._client.send_message("me", text)
 
     async def lockcmd(self, message: Message):
         """Добавить пользователя в список отслеживания. Использование: .lock @username <текст>"""
         args = utils.get_args_raw(message)
         if not args:
-            await utils.answer(message, self.strings("no_args"))
+            await self._notify(self.strings("no_args"))
             return
 
         try:
             user, text = args.split(maxsplit=1)
         except ValueError:
-            await utils.answer(message, self.strings("no_args"))
+            await self._notify(self.strings("no_args"))
             return
 
         try:
             user = await message.client.get_entity(user)
         except (TypeError, ValueError, UserIdInvalidError):
-            await utils.answer(message, self.strings("user_not_found"))
+            await self._notify(self.strings("user_not_found"))
             return
 
         user_id = user.id
@@ -56,25 +63,29 @@ class AutoReplyLockMod(loader.Module):
         self.locked_users[str(chat_id)][str(user_id)] = text
         self.db.set("AutoReplyLock", "locked", self.locked_users)
         
-        await utils.answer(
-            message,
+        # Получаем информацию о чате для уведомления
+        chat = await message.get_chat()
+        chat_title = chat.title if hasattr(chat, 'title') else "Private Chat"
+        
+        # Отправляем уведомление в избранное
+        await self._notify(
             self.strings("user_locked").format(
                 f"@{user.username}" if user.username else get_display_name(user),
                 text
-            )
+            ) + f"\n\nЧат: {chat_title} (ID: {chat_id})"
         )
 
     async def unlockcmd(self, message: Message):
         """Удалить пользователя из списка отслеживания. Использование: .unlock @username"""
         args = utils.get_args_raw(message)
         if not args:
-            await utils.answer(message, self.strings("no_args"))
+            await self._notify(self.strings("no_args"))
             return
 
         try:
             user = await message.client.get_entity(args.strip())
         except (TypeError, ValueError, UserIdInvalidError):
-            await utils.answer(message, self.strings("user_not_found"))
+            await self._notify(self.strings("user_not_found"))
             return
 
         chat_id = utils.get_chat_id(message)
@@ -88,23 +99,30 @@ class AutoReplyLockMod(loader.Module):
                 del self.locked_users[str(chat_id)]
                 
             self.db.set("AutoReplyLock", "locked", self.locked_users)
-            await utils.answer(
-                message,
+            
+            # Получаем информацию о чате для уведомления
+            chat = await message.get_chat()
+            chat_title = chat.title if hasattr(chat, 'title') else "Private Chat"
+            
+            await self._notify(
                 self.strings("user_unlocked").format(
                     f"@{user.username}" if user.username else get_display_name(user)
-                )
+                ) + f"\n\nЧат: {chat_title} (ID: {chat_id})"
             )
         else:
-            await utils.answer(message, self.strings("not_in_list"))
+            await self._notify(self.strings("not_in_list"))
 
     async def locklistcmd(self, message: Message):
         """Показать список отслеживаемых пользователей"""
         chat_id = utils.get_chat_id(message)
+        chat = await message.get_chat()
+        chat_title = chat.title if hasattr(chat, 'title') else "Private Chat"
+        
         if str(chat_id) not in self.locked_users or not self.locked_users[str(chat_id)]:
-            await utils.answer(message, self.strings("list_empty"))
+            await self._notify(f"{self.strings('list_empty')} {chat_title} (ID: {chat_id})")
             return
 
-        res = self.strings("lock_list")
+        res = self.strings("lock_list").format(chat_title)
         for user_id, text in self.locked_users[str(chat_id)].items():
             try:
                 user = await message.client.get_entity(int(user_id))
@@ -113,7 +131,7 @@ class AutoReplyLockMod(loader.Module):
             except: 
                 res += f"• ID:{user_id}: {text}\n"
 
-        await utils.answer(message, res)
+        await self._notify(res)
 
     @loader.watcher()
     async def watcher(self, message: Message):
@@ -141,7 +159,6 @@ class AutoReplyLockMod(loader.Module):
         last_time = self.last_message_time.get(user_str, 0)
         
         if current_time - last_time < self.cooldown:
-            # Можно добавить логирование, но не отправляем сообщение
             return
             
         self.last_message_time[user_str] = current_time
@@ -149,13 +166,13 @@ class AutoReplyLockMod(loader.Module):
         # Получаем текст ответа
         text = self.locked_users[chat_str][user_str]
         
-        # Отправляем ответ напрямую через клиент (минимальная задержка)
+        # Отправляем ответ напрямую через клиент
         try:
             await message.client.send_message(
                 entity=chat_id,
                 message=text,
                 reply_to=message.id
             )
-        except Exception as e:
-            # Логируем ошибку, но не прерываем работу
+        except Exception:
+            # Логируем ошибку в консоль
             pass
