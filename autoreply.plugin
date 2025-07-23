@@ -1,15 +1,15 @@
 import json
 import time
-import os
 from base_plugin import BasePlugin
-from android_utils import log, show_toast
+from android_utils import log
+from ui.bulletin import BulletinHelper
 from java.io import File, FileOutputStream, FileInputStream
 
 __id__ = "kastyan_autoreply"
 __name__ = "AutoReply by Kastyan"
 __description__ = "Автоматический ответ на сообщения. Команды: .lock @user текст, .unlock @user, .locklist"
 __author__ = "Kastyan"
-__version__ = "2.0"
+__version__ = "3.0"
 __min_version__ = "11.12.0"
 __icon__ = "plugin232/2"
 
@@ -28,23 +28,25 @@ class AutoReplyPlugin(BasePlugin):
             self.locked_users = {}
             self.last_reply = {}
             self.load_data()
-            show_toast("✅ AutoReply загружен")
+            BulletinHelper.show_success("✅ AutoReply загружен")
         except Exception as e:
             log(f"[AutoReply] Ошибка инициализации: {e}")
-            show_toast(f"🚫 Ошибка: {str(e)}")
+            BulletinHelper.show_error(f"🚫 Ошибка: {str(e)}")
 
     def load_data(self):
         try:
-            if self.data_file.exists():
+            if self.data_file.exists() and self.data_file.length() > 0:
                 fis = FileInputStream(self.data_file)
-                data = json.loads(fis.read().decode("utf-8"))
+                data_bytes = fis.read()
                 fis.close()
                 
+                data = json.loads(data_bytes.decode("utf-8"))
                 self.locked_users = data.get("users", {})
                 self.last_reply = data.get("time", {})
                 log(f"[AutoReply] Данные загружены: {len(self.locked_users)} чатов")
         except Exception as e:
             log(f"[AutoReply] Ошибка загрузки данных: {e}")
+            BulletinHelper.show_error(f"🚫 Ошибка загрузки данных: {str(e)}")
 
     def save_data(self):
         try:
@@ -54,11 +56,13 @@ class AutoReplyPlugin(BasePlugin):
             }
             
             fos = FileOutputStream(self.data_file)
-            fos.write(json.dumps(data).encode("utf-8"))
+            data_str = json.dumps(data)
+            fos.write(data_str.encode("utf-8"))
             fos.close()
             log("[AutoReply] Данные сохранены")
         except Exception as e:
             log(f"[AutoReply] Ошибка сохранения: {e}")
+            BulletinHelper.show_error(f"🚫 Ошибка сохранения: {str(e)}")
 
     def process_command(self, command, peer_id, args):
         try:
@@ -73,7 +77,7 @@ class AutoReplyPlugin(BasePlugin):
                     
                 self.locked_users[chat_id][username] = text
                 self.save_data()
-                show_toast(f"✅ Ответ для @{username} добавлен")
+                BulletinHelper.show_success(f"✅ Ответ для @{username} добавлен")
                 return True
                 
             elif command == "unlock" and len(args) >= 1:
@@ -82,27 +86,27 @@ class AutoReplyPlugin(BasePlugin):
                 if chat_id in self.locked_users and username in self.locked_users[chat_id]:
                     del self.locked_users[chat_id][username]
                     self.save_data()
-                    show_toast(f"❌ Ответ для @{username} удалён")
+                    BulletinHelper.show_success(f"❌ Ответ для @{username} удалён")
                     return True
                 else:
-                    show_toast("⚠️ Пользователь не найден")
+                    BulletinHelper.show_error("⚠️ Пользователь не найден")
                     return False
                     
             elif command == "locklist":
                 result = []
                 if chat_id in self.locked_users:
                     for user, text in self.locked_users[chat_id].items():
-                        result.append(f"• @{user}: {text}")
+                        result.append(f"@{user}: {text}")
                 
                 if result:
-                    show_toast("🔒 Автоответы:\n" + "\n".join(result))
+                    BulletinHelper.show_info("🔒 Автоответы:\n" + "\n".join(result))
                 else:
-                    show_toast("📭 Список автоответов пуст")
+                    BulletinHelper.show_info("📭 Список автоответов пуст")
                 return True
                 
         except Exception as e:
             log(f"[AutoReply] Ошибка команды: {str(e)}")
-            show_toast(f"🚫 Ошибка: {str(e)}")
+            BulletinHelper.show_error(f"🚫 Ошибка команды: {str(e)}")
         
         return False
 
@@ -126,6 +130,7 @@ class AutoReplyPlugin(BasePlugin):
                     
         except Exception as e:
             log(f"[AutoReply] Ошибка обработки команды: {str(e)}")
+            BulletinHelper.show_error(f"🚫 Ошибка обработки: {str(e)}")
         
         return None  # Не изменяем сообщение
 
@@ -145,6 +150,7 @@ class AutoReplyPlugin(BasePlugin):
                     
         except Exception as e:
             log(f"[AutoReply] Ошибка отправки ответа: {str(e)}")
+            BulletinHelper.show_error(f"🚫 Ошибка ответа: {str(e)}")
         
         return None  # Не отвечаем
 
