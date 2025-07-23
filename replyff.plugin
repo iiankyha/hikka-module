@@ -1,151 +1,141 @@
-import os
-import json
+import re
 import time
-from pyrogram import filters
-from pyrogram.types import Message
-from exteragram import ExteraGramPlugin
+import json
+import os
+from base_plugin import BasePlugin, HookResult, HookStrategy
+from android_utils import run_on_ui_thread, log
+from ui.bulletin import BulletinHelper
 
-class AutoReplyLock(ExteraGramPlugin):
-    # Обязательные метаданные для AYUGram
-    id = "kastyan_autoreply"
-    name = "AutoReply by Kastyan"
-    version = "0.001"
-    author = "Kastyan"
-    description = "Автоматический ответ на сообщения выбранных пользователей"
+__id__ = "kastyan_autoreply"
+__name__ = "AutoReply by Kastyan"
+__description__ = "Автоматический ответ на сообщения выбранных пользователей. Команды: .lock, .unlock, .locklist"
+__author__ = "Kastyan"
+__version__ = "0.001"
+__min_version__ = "11.12.0"
+__icon__ = "plugin232/2"
 
-    async def on_load(self):
-        self.data_file = "kastyan_autoreply.json"
+class AutoReplyPlugin(BasePlugin):
+    def on_plugin_load(self):
+        self.data_file = os.path.join(self.get_data_dir(), "autoreply_data.json")
         self.locked_users = {}
         self.last_reply_time = {}
         self.load_data()
-        print(f"[AutoReply] Плагин v{self.version} загружен")
-
+        
+        self.add_on_send_message_hook()
+        self.add_on_receive_message_hook()
+        
     def load_data(self):
         if os.path.exists(self.data_file):
-            with open(self.data_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                self.locked_users = data.get('users', {})
-                self.last_reply_time = data.get('time', {})
+            try:
+                with open(self.data_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    self.locked_users = data.get('users', {})
+                    self.last_reply_time = data.get('time', {})
+            except Exception as e:
+                log(f"AutoReply load error: {e}")
 
     def save_data(self):
-        with open(self.data_file, 'w', encoding='utf-8') as f:
-            json.dump({
-                'users': self.locked_users,
-                'time': self.last_reply_time
-            }, f, indent=4)
-
-    async def notify(self, text: str):
         try:
-            await self.client.send_message("me", f"🔔 AutoReply:\n{text}")
-        except:
-            pass
-
-    @ExteraGramPlugin.on_cmd(
-        command="lock",
-        usage="Добавить пользователя (.lock @user текст или ответ)"
-    )
-    async def lock_cmd(self, _, message: Message):
-        try:
-            if message.reply_to_message:
-                user = message.reply_to_message.from_user
-                text = " ".join(message.command[1:])
-            else:
-                if len(message.command) < 3:
-                    return await message.edit("❌ Формат: .lock @user текст")
-                user = await self.client.get_users(message.command[1])
-                text = " ".join(message.command[2:])
-
-            chat_id = str(message.chat.id)
-            user_id = str(user.id)
-
-            if chat_id not in self.locked_users:
-                self.locked_users[chat_id] = {}
-
-            self.locked_users[chat_id][user_id] = text
-            self.save_data()
-
-            await self.notify(
-                f"✅ Добавлен в {message.chat.title or 'ЛС'}\n"
-                f"👤 {user.first_name} (ID: {user.id})\n"
-                f"💬 Ответ: {text}"
-            )
-            await message.delete()
-
+            with open(self.data_file, 'w', encoding='utf-8') as f:
+                json.dump({
+                    'users': self.locked_users,
+                    'time': self.last_reply_time
+                }, f, indent=4)
         except Exception as e:
-            await message.edit(f"❌ Ошибка: {e}")
+            log(f"AutoReply save error: {e}")
 
-    @ExteraGramPlugin.on_cmd(
-        command="unlock",
-        usage="Удалить пользователя (.unlock @user или ответ)"
-    )
-    async def unlock_cmd(self, _, message: Message):
-        try:
-            if message.reply_to_message:
-                user = message.reply_to_message.from_user
-            else:
-                if len(message.command) < 2:
-                    return await message.edit("❌ Формат: .unlock @user")
-                user = await self.client.get_users(message.command[1])
+    def on_send_message_hook(self, account, params):
+        if not hasattr(params, "message") or not isinstance(params.message, str):
+            return HookResult()
 
-            chat_id = str(message.chat.id)
-            user_id = str(user.id)
-
-            if chat_id in self.locked_users and user_id in self.locked_users[chat_id]:
-                del self.locked_users[chat_id][user_id]
+        # Обработка команды .lock
+        if params.message.startswith('.lock '):
+            try:
+                args = params.message[6:].split(maxsplit=1)
+                if len(args) < 2:
+                    BulletinHelper.show_error("Формат: .lock @user текст")
+                    return HookResult(strategy=HookStrategy.CANCEL)
+                    
+                user_id = args[0].strip('@')
+                text = args[1]
+                
+                chat_id = str(params.peer_id)
+                if chat_id not in self.locked_users:
+                    self.locked_users[chat_id] = {}
+                    
+                self.locked_users[chat_id][user_id] = text
                 self.save_data()
-                await self.notify(
-                    f"❌ Удалён из {message.chat.title or 'ЛС'}\n"
-                    f"👤 {user.first_name} (ID: {user.id})"
-                )
-                await message.delete()
-            else:
-                await message.edit("❌ Пользователь не найден", del_in=5)
+                
+                BulletinHelper.show_success(f"Добавлен автоответ для @{user_id}")
+                params.message = ""
+                return HookResult(strategy=HookStrategy.MODIFY, params=params)
+                
+            except Exception as e:
+                BulletinHelper.show_error(f"Ошибка: {str(e)}")
+                return HookResult(strategy=HookStrategy.CANCEL)
 
-        except Exception as e:
-            await message.edit(f"❌ Ошибка: {e}")
+        # Обработка команды .unlock
+        elif params.message.startswith('.unlock '):
+            try:
+                user_id = params.message[8:].strip().strip('@')
+                chat_id = str(params.peer_id)
+                
+                if chat_id in self.locked_users and user_id in self.locked_users[chat_id]:
+                    del self.locked_users[chat_id][user_id]
+                    self.save_data()
+                    BulletinHelper.show_success(f"Удалён автоответ для @{user_id}")
+                else:
+                    BulletinHelper.show_error("Пользователь не найден")
+                    
+                params.message = ""
+                return HookResult(strategy=HookStrategy.MODIFY, params=params)
+                
+            except Exception as e:
+                BulletinHelper.show_error(f"Ошибка: {str(e)}")
+                return HookResult(strategy=HookStrategy.CANCEL)
 
-    @ExteraGramPlugin.on_cmd("locklist")
-    async def list_cmd(self, _, message: Message):
+        # Обработка команды .locklist
+        elif params.message == '.locklist':
+            try:
+                chat_id = str(params.peer_id)
+                if chat_id not in self.locked_users or not self.locked_users[chat_id]:
+                    BulletinHelper.show_info("Список пуст")
+                else:
+                    users = []
+                    for uid, text in self.locked_users[chat_id].items():
+                        users.append(f"@{uid}: {text}")
+                    BulletinHelper.show_info("Автоответы:\n" + "\n".join(users))
+                    
+                params.message = ""
+                return HookResult(strategy=HookStrategy.MODIFY, params=params)
+                
+            except Exception as e:
+                BulletinHelper.show_error(f"Ошибка: {str(e)}")
+                return HookResult(strategy=HookStrategy.CANCEL)
+
+        return HookResult()
+
+    def on_receive_message_hook(self, account, params):
         try:
-            chat_id = str(message.chat.id)
-            if not self.locked_users.get(chat_id):
-                return await message.edit("❌ Список пуст")
+            if not hasattr(params, "message") or not hasattr(params, "sender_id"):
+                return HookResult()
 
-            result = "🔒 Отслеживаемые:\n\n"
-            for user_id, text in self.locked_users[chat_id].items():
-                try:
-                    user = await self.client.get_users(int(user_id))
-                    name = f"@{user.username}" if user.username else user.first_name
-                    result += f"• {name}: {text}\n"
-                except:
-                    result += f"• ID {user_id}: {text}\n"
-
-            await self.notify(f"Список в {message.chat.title or 'ЛС'}:\n\n{result}")
-            await message.edit("✅ Список отправлен в избранное")
-            await message.delete()
-
-        except Exception as e:
-            await message.edit(f"❌ Ошибка: {e}")
-
-    @ExteraGramPlugin.on_message(filters.incoming & ~filters.me)
-    async def watcher(self, _, message: Message):
-        try:
-            if not message.from_user:
-                return
-
-            chat_id = str(message.chat.id)
-            user_id = str(message.from_user.id)
+            chat_id = str(params.peer_id)
+            user_id = str(params.sender_id)
             current_time = time.time()
 
-            if (chat_id in self.locked_users 
-                and user_id in self.locked_users[chat_id]
-                and current_time - self.last_reply_time.get(user_id, 0) > 1.0):
+            if (chat_id in self.locked_users and 
+                user_id in self.locked_users[chat_id] and
+                current_time - self.last_reply_time.get(user_id, 0) > 1.0):
                 
-                await message.reply(self.locked_users[chat_id][user_id])
+                reply_text = self.locked_users[chat_id][user_id]
                 self.last_reply_time[user_id] = current_time
-
-        except:
-            pass
-
-def __load__():
-    return AutoReplyLock()
+                
+                # Создаем новое сообщение с ответом
+                params.reply_message = reply_text
+                return HookResult(strategy=HookStrategy.MODIFY, params=params)
+                
+        except Exception as e:
+            log(f"AutoReply error: {e}")
+            
+        return HookResult()
