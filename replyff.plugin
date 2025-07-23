@@ -1,29 +1,37 @@
-import re
-import time
-import json
 import os
+import json
+import time
 from base_plugin import BasePlugin, HookResult, HookStrategy
 from android_utils import run_on_ui_thread, log
 from ui.bulletin import BulletinHelper
 
 __id__ = "kastyan_autoreply"
 __name__ = "AutoReply by Kastyan"
-__description__ = "Автоматический ответ на сообщения выбранных пользователей. Команды: .lock, .unlock, .locklist"
+__description__ = "Автоматический ответ на сообщения. Команды: .lock @user текст, .unlock @user, .locklist"
 __author__ = "Kastyan"
-__version__ = "0.001"
+__version__ = "1.0"
 __min_version__ = "11.12.0"
 __icon__ = "plugin232/2"
 
 class AutoReplyPlugin(BasePlugin):
     def on_plugin_load(self):
-        self.data_file = os.path.join(self.get_data_dir(), "autoreply_data.json")
+        # Используем стандартный путь для данных плагина
+        self.data_file = os.path.join(
+            os.environ['EXTERNAL_STORAGE'],
+            'AYUGram',
+            'plugin_data',
+            f'{self.id}.json'
+        )
+        os.makedirs(os.path.dirname(self.data_file), exist_ok=True)
+        
         self.locked_users = {}
         self.last_reply_time = {}
         self.load_data()
         
         self.add_on_send_message_hook()
         self.add_on_receive_message_hook()
-        
+        log(f"[AutoReply] Плагин загружен! Версия {self.version}")
+
     def load_data(self):
         if os.path.exists(self.data_file):
             try:
@@ -32,7 +40,9 @@ class AutoReplyPlugin(BasePlugin):
                     self.locked_users = data.get('users', {})
                     self.last_reply_time = data.get('time', {})
             except Exception as e:
-                log(f"AutoReply load error: {e}")
+                log(f"[AutoReply] Ошибка загрузки: {e}")
+                self.locked_users = {}
+                self.last_reply_time = {}
 
     def save_data(self):
         try:
@@ -40,44 +50,41 @@ class AutoReplyPlugin(BasePlugin):
                 json.dump({
                     'users': self.locked_users,
                     'time': self.last_reply_time
-                }, f, indent=4)
+                }, f, indent=4, ensure_ascii=False)
         except Exception as e:
-            log(f"AutoReply save error: {e}")
+            log(f"[AutoReply] Ошибка сохранения: {e}")
 
     def on_send_message_hook(self, account, params):
-        if not hasattr(params, "message") or not isinstance(params.message, str):
-            return HookResult()
+        try:
+            if not hasattr(params, "message") or not isinstance(params.message, str):
+                return HookResult()
 
-        # Обработка команды .lock
-        if params.message.startswith('.lock '):
-            try:
-                args = params.message[6:].split(maxsplit=1)
-                if len(args) < 2:
+            msg = params.message.strip()
+            
+            # Обработка .lock
+            if msg.startswith('.lock '):
+                parts = msg[6:].split(maxsplit=1)
+                if len(parts) < 2:
                     BulletinHelper.show_error("Формат: .lock @user текст")
                     return HookResult(strategy=HookStrategy.CANCEL)
-                    
-                user_id = args[0].strip('@')
-                text = args[1]
                 
+                user_id = parts[0].strip('@')
+                text = parts[1]
                 chat_id = str(params.peer_id)
+                
                 if chat_id not in self.locked_users:
                     self.locked_users[chat_id] = {}
-                    
+                
                 self.locked_users[chat_id][user_id] = text
                 self.save_data()
                 
                 BulletinHelper.show_success(f"Добавлен автоответ для @{user_id}")
-                params.message = ""
+                params.message = ""  # Удаляем оригинальное сообщение
                 return HookResult(strategy=HookStrategy.MODIFY, params=params)
-                
-            except Exception as e:
-                BulletinHelper.show_error(f"Ошибка: {str(e)}")
-                return HookResult(strategy=HookStrategy.CANCEL)
-
-        # Обработка команды .unlock
-        elif params.message.startswith('.unlock '):
-            try:
-                user_id = params.message[8:].strip().strip('@')
+            
+            # Обработка .unlock
+            elif msg.startswith('.unlock '):
+                user_id = msg[8:].strip().strip('@')
                 chat_id = str(params.peer_id)
                 
                 if chat_id in self.locked_users and user_id in self.locked_users[chat_id]:
@@ -86,33 +93,26 @@ class AutoReplyPlugin(BasePlugin):
                     BulletinHelper.show_success(f"Удалён автоответ для @{user_id}")
                 else:
                     BulletinHelper.show_error("Пользователь не найден")
-                    
+                
                 params.message = ""
                 return HookResult(strategy=HookStrategy.MODIFY, params=params)
-                
-            except Exception as e:
-                BulletinHelper.show_error(f"Ошибка: {str(e)}")
-                return HookResult(strategy=HookStrategy.CANCEL)
-
-        # Обработка команды .locklist
-        elif params.message == '.locklist':
-            try:
+            
+            # Обработка .locklist
+            elif msg == '.locklist':
                 chat_id = str(params.peer_id)
                 if chat_id not in self.locked_users or not self.locked_users[chat_id]:
-                    BulletinHelper.show_info("Список пуст")
+                    BulletinHelper.show_info("Список автоответов пуст")
                 else:
-                    users = []
-                    for uid, text in self.locked_users[chat_id].items():
-                        users.append(f"@{uid}: {text}")
+                    users = [f"@{uid}: {text}" for uid, text in self.locked_users[chat_id].items()]
                     BulletinHelper.show_info("Автоответы:\n" + "\n".join(users))
-                    
+                
                 params.message = ""
                 return HookResult(strategy=HookStrategy.MODIFY, params=params)
                 
-            except Exception as e:
-                BulletinHelper.show_error(f"Ошибка: {str(e)}")
-                return HookResult(strategy=HookStrategy.CANCEL)
-
+        except Exception as e:
+            log(f"[AutoReply] Ошибка в on_send_message_hook: {e}")
+            BulletinHelper.show_error(f"Ошибка: {str(e)}")
+        
         return HookResult()
 
     def on_receive_message_hook(self, account, params):
@@ -131,11 +131,19 @@ class AutoReplyPlugin(BasePlugin):
                 reply_text = self.locked_users[chat_id][user_id]
                 self.last_reply_time[user_id] = current_time
                 
-                # Создаем новое сообщение с ответом
-                params.reply_message = reply_text
+                # Создаем параметры для ответа
+                if not hasattr(params, "reply_message"):
+                    params.reply_message = reply_text
+                else:
+                    params.reply_message += f"\n{reply_text}"
+                
                 return HookResult(strategy=HookStrategy.MODIFY, params=params)
                 
         except Exception as e:
-            log(f"AutoReply error: {e}")
+            log(f"[AutoReply] Ошибка в on_receive_message_hook: {e}")
             
         return HookResult()
+
+    def on_plugin_unload(self):
+        log("[AutoReply] Плагин выгружен")
+        self.save_data()
