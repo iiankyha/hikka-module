@@ -6,161 +6,120 @@ from pyrogram.types import Message
 from exteragram import ExteraGramPlugin
 
 class AutoReplyLock(ExteraGramPlugin):
-    __version__ = "1.0"
-    __author__ = "YourName"
+    __doc__ = """
+    Автоматический ответ на сообщения выбранных пользователей
+    
+    Команды:
+    .lock [@user|ответ] <текст> - добавить в список
+    .unlock [@user|ответ] - удалить из списка
+    .locklist - показать список
+    """
+    __version__ = "2.0"
     
     def __init__(self):
-        super().__init__()  # Важно для инициализации плагина
         self.locked_users = {}
-        self.last_message_time = {}
-        self.cooldown = 1.0
-        self.data_file = "autoreply_lock.json"
+        self.data_file = "autoreply_data.json"
         self.load_data()
-
+        
     def load_data(self):
         if os.path.exists(self.data_file):
-            with open(self.data_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                self.locked_users = data.get("locked_users", {})
-                self.last_message_time = data.get("last_message_time", {})
-
+            with open(self.data_file, 'r') as f:
+                self.locked_users = json.load(f)
+    
     def save_data(self):
-        data = {
-            "locked_users": self.locked_users,
-            "last_message_time": self.last_message_time
-        }
-        with open(self.data_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
+        with open(self.data_file, 'w') as f:
+            json.dump(self.locked_users, f)
 
-    async def _notify(self, client: Client, text: str):
+    @ExteraGramPlugin.on_cmd("lock")
+    async def lock_user(self, client: Client, message: Message):
+        """Добавить пользователя"""
         try:
-            await client.send_message("me", text)
-        except:
-            pass
-
-    @ExteraGramPlugin.on_cmd(
-        command="lock",
-        usage="Добавить пользователя (.lock @user текст или ответ на сообщение)"
-    )
-    async def lock_command(self, client: Client, message: Message):
-        if message.reply_to_message:
-            user = message.reply_to_message.from_user
-            text = " ".join(message.command[1:]) if len(message.command) > 1 else ""
-        else:
-            if len(message.command) < 3:
-                await message.edit("❌ Формат: <code>.lock @user текст</code> или ответ на сообщение")
-                return
-            try:
+            if message.reply_to_message:
+                user = message.reply_to_message.from_user
+                text = " ".join(message.command[1:])
+            else:
+                if len(message.command) < 3:
+                    return await message.edit("❌ Нужен текст: <code>.lock @user текст</code>")
                 user = await client.get_users(message.command[1])
                 text = " ".join(message.command[2:])
-            except:
-                await message.edit("❌ Пользователь не найден")
-                return
-
-        if not text:
-            await message.edit("❌ Не указан текст ответа")
-            return
-
-        chat_id = message.chat.id
-        user_id = user.id
-
-        if str(chat_id) not in self.locked_users:
-            self.locked_users[str(chat_id)] = {}
-
-        self.locked_users[str(chat_id)][str(user_id)] = text
-        self.save_data()
-
-        chat_title = message.chat.title or "ЛС"
-        await self._notify(
-            client,
-            f"✅ Добавлен: <b>{user.first_name}</b>\n"
-            f"📝 Текст: <code>{text}</code>\n"
-            f"💬 Чат: <code>{chat_title}</code> (ID: {chat_id})"
-        )
-        await message.delete()
-
-    @ExteraGramPlugin.on_cmd(
-        command="unlock",
-        usage="Удалить пользователя (.unlock @user или ответ на сообщение)"
-    )
-    async def unlock_command(self, client: Client, message: Message):
-        if message.reply_to_message:
-            user = message.reply_to_message.from_user
-        else:
-            if len(message.command) < 2:
-                await message.edit("❌ Формат: <code>.unlock @user</code> или ответ на сообщение")
-                return
-            try:
-                user = await client.get_users(message.command[1])
-            except:
-                await message.edit("❌ Пользователь не найден")
-                return
-
-        chat_id = message.chat.id
-        user_id = user.id
-
-        if (str(chat_id) in self.locked_users and 
-            str(user_id) in self.locked_users[str(chat_id)]):
-            del self.locked_users[str(chat_id)][str(user_id)]
+            
+            chat_id = str(message.chat.id)
+            user_id = str(user.id)
+            
+            if chat_id not in self.locked_users:
+                self.locked_users[chat_id] = {}
+                
+            self.locked_users[chat_id][user_id] = text
             self.save_data()
             
-            chat_title = message.chat.title or "ЛС"
-            await self._notify(
-                client,
-                f"✅ Удалён: <b>{user.first_name}</b>\n"
-                f"💬 Чат: <code>{chat_title}</code> (ID: {chat_id})"
-            )
+            await message.edit(f"✅ {user.first_name} добавлен")
             await message.delete()
-        else:
-            await message.edit("❌ Пользователь не в списке", del_in=5)
+        except Exception as e:
+            await message.edit(f"❌ Ошибка: {str(e)}")
 
-    @ExteraGramPlugin.on_cmd(
-        command="locklist",
-        usage="Показать список отслеживаемых пользователей"
-    )
-    async def locklist_command(self, client: Client, message: Message):
-        chat_id = message.chat.id
-        chat_title = message.chat.title or "ЛС"
-
-        if str(chat_id) not in self.locked_users or not self.locked_users[str(chat_id)]:
-            await self._notify(client, f"❌ Список пуст для чата <code>{chat_title}</code>")
-            return
-
-        res = f"📝 Отслеживаемые в <b>{chat_title}</b>:\n\n"
-        for user_id, text in self.locked_users[str(chat_id)].items():
-            try:
-                user = await client.get_users(int(user_id))
-                name = f"@{user.username}" if user.username else user.first_name
-                res += f"• <b>{name}</b>: <code>{text}</code>\n"
-            except:
-                res += f"• ID <code>{user_id}</code>: <code>{text}</code>\n"
-
-        await self._notify(client, res)
-        await message.delete()
-
-    @ExteraGramPlugin.on_message(filters.incoming & ~filters.me & ~filters.service)
-    async def watcher(self, client: Client, message: Message):
-        if not message.from_user:
-            return
-
-        chat_id = message.chat.id
-        user_id = message.from_user.id
-        user_str = str(user_id)
-        chat_str = str(chat_id)
-
-        if (chat_str not in self.locked_users or 
-            user_str not in self.locked_users[chat_str]):
-            return
-
-        current_time = time.time()
-        last_time = self.last_message_time.get(user_str, 0)
-        if current_time - last_time < self.cooldown:
-            return
-
-        self.last_message_time[user_str] = current_time
-        text = self.locked_users[chat_str][user_str]
-
+    @ExteraGramPlugin.on_cmd("unlock")
+    async def unlock_user(self, client: Client, message: Message):
+        """Удалить пользователя"""
         try:
-            await message.reply(text)
+            if message.reply_to_message:
+                user = message.reply_to_message.from_user
+            else:
+                if len(message.command) < 2:
+                    return await message.edit("❌ Укажите: <code>.unlock @user</code>")
+                user = await client.get_users(message.command[1])
+                
+            chat_id = str(message.chat.id)
+            user_id = str(user.id)
+            
+            if chat_id in self.locked_users and user_id in self.locked_users[chat_id]:
+                del self.locked_users[chat_id][user_id]
+                self.save_data()
+                await message.edit(f"✅ {user.first_name} удален")
+            else:
+                await message.edit("❌ Пользователь не найден")
+                
+            await message.delete()
+        except Exception as e:
+            await message.edit(f"❌ Ошибка: {str(e)}")
+
+    @ExteraGramPlugin.on_cmd("locklist")
+    async def list_locked(self, client: Client, message: Message):
+        """Показать список"""
+        try:
+            chat_id = str(message.chat.id)
+            if chat_id not in self.locked_users or not self.locked_users[chat_id]:
+                return await message.edit("❌ Список пуст")
+                
+            users = []
+            for user_id, text in self.locked_users[chat_id].items():
+                try:
+                    user = await client.get_users(int(user_id))
+                    name = user.first_name
+                    if user.username:
+                        name = f"@{user.username}"
+                    users.append(f"• {name}: {text}")
+                except:
+                    users.append(f"• ID:{user_id}: {text}")
+                    
+            await message.edit("🔒 Отслеживаемые:\n" + "\n".join(users))
+            await message.delete()
+        except Exception as e:
+            await message.edit(f"❌ Ошибка: {str(e)}")
+
+    @ExteraGramPlugin.on_message(filters.incoming & ~filters.me)
+    async def watcher(self, client: Client, message: Message):
+        """Отвечает на сообщения"""
+        try:
+            if not message.from_user:
+                return
+                
+            chat_id = str(message.chat.id)
+            user_id = str(message.from_user.id)
+            
+            if chat_id in self.locked_users and user_id in self.locked_users[chat_id]:
+                await message.reply(self.locked_users[chat_id][user_id])
         except:
             pass
+
+def __load__():
+    return AutoReplyLock()
