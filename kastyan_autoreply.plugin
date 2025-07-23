@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-# ID: kastyan_autoreply
-# Name: AutoReply by Kastyan
-# Version: 1.0
-# Author: Kastyan
-# Description: Автоматический ответ на сообщения. Команды: .lock @user текст, .unlock @user, .locklist
-# MinVersion: 11.12.0
-# Icon: plugin232/2
+__id__ = "kastyan_autoreply"
+__name__ = "AutoReply by Kastyan"
+__version__ = "2.1"
+__author__ = "Kastyan"
+__description__ = "Автоматический ответ на сообщения. Команды: .lock @user текст, .unlock @user, .locklist"
+__min_version__ = "11.12.0"
+__icon__ = "plugin232/2"
 
 import json
 import time
@@ -26,7 +26,6 @@ class AutoReplyPlugin(BasePlugin):
             data = json.loads(self.read_setting("autoreply_data", "{}"))
             self.locked_users = data.get("users", {})
             self.last_reply = data.get("time", {})
-            log(f"[AutoReply] Загружено {len(self.locked_users)} пользователей")
         except Exception as e:
             log(f"[AutoReply] Ошибка загрузки: {e}")
 
@@ -36,7 +35,6 @@ class AutoReplyPlugin(BasePlugin):
                 "users": self.locked_users,
                 "time": self.last_reply
             }))
-            log("[AutoReply] Данные сохранены")
         except Exception as e:
             log(f"[AutoReply] Ошибка сохранения: {e}")
 
@@ -44,16 +42,14 @@ class AutoReplyPlugin(BasePlugin):
         try:
             msg = message.strip()
             
-            # Обработка команды .lock
             if msg.startswith('.lock ') and len(msg.split()) >= 3:
                 _, user, *text = msg.split(maxsplit=2)
                 chat_id = str(peer_id)
                 self.locked_users.setdefault(chat_id, {})[user.strip('@')] = text[0]
                 self.save_data()
                 BulletinHelper.show_success(f"✅ Ответ для {user} добавлен")
-                return ""  # Удаляем сообщение
+                return ""
 
-            # Обработка команды .unlock
             elif msg.startswith('.unlock '):
                 user = msg.split()[1].strip('@')
                 chat_id = str(peer_id)
@@ -65,7 +61,6 @@ class AutoReplyPlugin(BasePlugin):
                     BulletinHelper.show_error("⚠️ Пользователь не найден")
                 return ""
 
-            # Обработка команды .locklist
             elif msg == '.locklist':
                 chat_id = str(peer_id)
                 if chat_id in self.locked_users and self.locked_users[chat_id]:
