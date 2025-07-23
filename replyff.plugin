@@ -1,126 +1,153 @@
 import json
 import time
+import os
 from base_plugin import BasePlugin
 from android_utils import log, show_toast
-from java.io import File
+from java.io import File, FileOutputStream, FileInputStream
 
 __id__ = "kastyan_autoreply"
 __name__ = "AutoReply by Kastyan"
-__description__ = "Автоматический ответ. Команды: .lock @user текст, .unlock @user, .locklist"
+__description__ = "Автоматический ответ на сообщения. Команды: .lock @user текст, .unlock @user, .locklist"
 __author__ = "Kastyan"
-__version__ = "1.4"
+__version__ = "2.0"
 __min_version__ = "11.12.0"
 __icon__ = "plugin232/2"
 
 class AutoReplyPlugin(BasePlugin):
     def on_plugin_load(self):
-        log("[AutoReply] Плагин загружается...")
-        self.data_file = File(self.getApplicationContext().getFilesDir(), "kastyan_autoreply.json")
-        self.locked_users = {}
-        self.last_reply = {}
-        self.load_data()
-        log(f"[AutoReply] Загружено {len(self.locked_users)} чатов")
-        show_toast("AutoReply loaded!")
+        log("[AutoReply] Плагин запущен")
+        try:
+            # Создаем папку для данных плагина
+            self.data_dir = File(self.getApplicationContext().getFilesDir(), "autoreply_data")
+            if not self.data_dir.exists():
+                self.data_dir.mkdirs()
+            
+            # Файл для хранения данных
+            self.data_file = File(self.data_dir, "users.json")
+            
+            self.locked_users = {}
+            self.last_reply = {}
+            self.load_data()
+            show_toast("✅ AutoReply загружен")
+        except Exception as e:
+            log(f"[AutoReply] Ошибка инициализации: {e}")
+            show_toast(f"🚫 Ошибка: {str(e)}")
 
     def load_data(self):
         try:
             if self.data_file.exists():
-                with open(self.data_file.getPath(), 'r') as f:
-                    data = json.load(f)
-                    self.locked_users = data.get('users', {})
-                    self.last_reply = data.get('time', {})
-                    log("[AutoReply] Данные загружены")
+                fis = FileInputStream(self.data_file)
+                data = json.loads(fis.read().decode("utf-8"))
+                fis.close()
+                
+                self.locked_users = data.get("users", {})
+                self.last_reply = data.get("time", {})
+                log(f"[AutoReply] Данные загружены: {len(self.locked_users)} чатов")
         except Exception as e:
-            log(f"[AutoReply] Ошибка загрузки: {e}")
+            log(f"[AutoReply] Ошибка загрузки данных: {e}")
 
     def save_data(self):
         try:
-            with open(self.data_file.getPath(), 'w') as f:
-                json.dump({
-                    'users': self.locked_users,
-                    'time': self.last_reply
-                }, f, indent=2)
+            data = {
+                "users": self.locked_users,
+                "time": self.last_reply
+            }
+            
+            fos = FileOutputStream(self.data_file)
+            fos.write(json.dumps(data).encode("utf-8"))
+            fos.close()
             log("[AutoReply] Данные сохранены")
         except Exception as e:
             log(f"[AutoReply] Ошибка сохранения: {e}")
 
-    def on_command(self, command, peer_id, args):
+    def process_command(self, command, peer_id, args):
         try:
             chat_id = str(peer_id)
-            log(f"[AutoReply] Обработка команды: {command} {args} в чате {chat_id}")
-
+            
             if command == "lock" and len(args) >= 2:
-                user = args[0].strip('@')
+                username = args[0].strip('@')
                 text = ' '.join(args[1:])
+                
                 if chat_id not in self.locked_users:
                     self.locked_users[chat_id] = {}
-                self.locked_users[chat_id][user] = text
+                    
+                self.locked_users[chat_id][username] = text
                 self.save_data()
-                show_toast(f"✅ Ответ для @{user} добавлен")
-                log(f"[AutoReply] Добавлен ответ для @{user}: {text}")
+                show_toast(f"✅ Ответ для @{username} добавлен")
                 return True
-
-            elif command == "unlock" and args:
-                user = args[0].strip('@')
-                if chat_id in self.locked_users and user in self.locked_users[chat_id]:
-                    del self.locked_users[chat_id][user]
+                
+            elif command == "unlock" and len(args) >= 1:
+                username = args[0].strip('@')
+                
+                if chat_id in self.locked_users and username in self.locked_users[chat_id]:
+                    del self.locked_users[chat_id][username]
                     self.save_data()
-                    show_toast(f"❌ Ответ для @{user} удалён")
-                    log(f"[AutoReply] Удалён ответ для @{user}")
+                    show_toast(f"❌ Ответ для @{username} удалён")
+                    return True
                 else:
                     show_toast("⚠️ Пользователь не найден")
-                return True
-
+                    return False
+                    
             elif command == "locklist":
-                users = []
+                result = []
                 if chat_id in self.locked_users:
-                    users = [f"@{u}" for u in self.locked_users[chat_id].keys()]
-                msg = "Автоответы: " + (', '.join(users) if users else "Список пуст"
-                show_toast(msg)
-                log(f"[AutoReply] Список: {msg}")
+                    for user, text in self.locked_users[chat_id].items():
+                        result.append(f"• @{user}: {text}")
+                
+                if result:
+                    show_toast("🔒 Автоответы:\n" + "\n".join(result))
+                else:
+                    show_toast("📭 Список автоответов пуст")
                 return True
-
+                
         except Exception as e:
-            log(f"[AutoReply] Ошибка команды: {e}")
+            log(f"[AutoReply] Ошибка команды: {str(e)}")
             show_toast(f"🚫 Ошибка: {str(e)}")
+        
         return False
 
     def on_send_message(self, account, peer_id, message):
         try:
             msg = message.strip()
-            log(f"[AutoReply] Получено сообщение: {msg}")
-
+            
             if msg.startswith('.lock '):
-                if self.on_command("lock", peer_id, msg[6:].split()):
-                    return ""  # Удаляем оригинальное сообщение
-
+                args = msg[6:].split()
+                if len(args) >= 2 and self.process_command("lock", peer_id, args):
+                    return ""  # Удаляем исходное сообщение
+                    
             elif msg.startswith('.unlock '):
-                if self.on_command("unlock", peer_id, msg[8:].split()):
+                args = msg[8:].split()
+                if args and self.process_command("unlock", peer_id, args):
                     return ""
-
+                    
             elif msg == '.locklist':
-                if self.on_command("locklist", peer_id, []):
+                if self.process_command("locklist", peer_id, []):
                     return ""
-
+                    
         except Exception as e:
-            log(f"[AutoReply] Ошибка обработки: {e}")
-        return None
+            log(f"[AutoReply] Ошибка обработки команды: {str(e)}")
+        
+        return None  # Не изменяем сообщение
 
     def on_message(self, account, peer_id, sender_id, message):
         try:
             chat_id = str(peer_id)
             user_id = str(sender_id)
             current_time = time.time()
-            log(f"[AutoReply] Новое сообщение от {user_id} в {chat_id}")
-
+            
+            # Проверяем, есть ли автоответ для этого пользователя
             if chat_id in self.locked_users and user_id in self.locked_users[chat_id]:
+                # Проверяем кулдаун
                 last_time = self.last_reply.get(user_id, 0)
-                if current_time - last_time > 1.0:
-                    reply = self.locked_users[chat_id][user_id]
+                if current_time - last_time > 1.0:  # 1 секунда между ответами
                     self.last_reply[user_id] = current_time
-                    log(f"[AutoReply] Отправка ответа: {reply}")
-                    return reply
-
+                    return self.locked_users[chat_id][user_id]
+                    
         except Exception as e:
-            log(f"[AutoReply] Ошибка ответа: {e}")
-        return None
+            log(f"[AutoReply] Ошибка отправки ответа: {str(e)}")
+        
+        return None  # Не отвечаем
+
+    def on_plugin_unload(self):
+        log("[AutoReply] Плагин выгружен")
+        self.save_data()
