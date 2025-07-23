@@ -1,6 +1,6 @@
 import json
 import time
-from base_plugin import BasePlugin, HookResult, HookStrategy
+from base_plugin import BasePlugin
 from android_utils import log
 from ui.bulletin import BulletinHelper
 from java.io import File
@@ -9,7 +9,7 @@ __id__ = "kastyan_autoreply"
 __name__ = "AutoReply by Kastyan"
 __description__ = "Автоматический ответ на сообщения. Команды: .lock @user текст, .unlock @user, .locklist"
 __author__ = "Kastyan"
-__version__ = "1.2"
+__version__ = "1.3"
 __min_version__ = "11.12.0"
 __icon__ = "plugin232/2"
 
@@ -19,11 +19,11 @@ class AutoReplyPlugin(BasePlugin):
         self.last_reply_time = {}
         self.load_data()
         self.add_on_send_message_hook()
-        log(f"[AutoReply] Плагин загружен v{self.version}")
+        log(f"[AutoReply] Плагин инициализирован v{self.version}")
 
     def get_data_file(self):
         context = self.getApplicationContext()
-        return File(context.getFilesDir(), "autoreply_data.json")
+        return File(context.getFilesDir(), "kastyan_autoreply.json")
 
     def load_data(self):
         try:
@@ -34,7 +34,7 @@ class AutoReplyPlugin(BasePlugin):
                     self.locked_users = data.get('users', {})
                     self.last_reply_time = data.get('time', {})
         except Exception as e:
-            log(f"[AutoReply] Load error: {e}")
+            log(f"[AutoReply] Ошибка загрузки: {e}")
 
     def save_data(self):
         try:
@@ -43,81 +43,66 @@ class AutoReplyPlugin(BasePlugin):
                 json.dump({
                     'users': self.locked_users,
                     'time': self.last_reply_time
-                }, f)
+                }, f, indent=2)
         except Exception as e:
-            log(f"[AutoReply] Save error: {e}")
+            log(f"[AutoReply] Ошибка сохранения: {e}")
 
-    def process_lock_command(self, peer_id, args):
-        if len(args) < 2:
-            BulletinHelper.show_error("Формат: .lock @user текст")
-            return False
-            
-        user = args[0].strip('@')
-        text = ' '.join(args[1:])
-        chat_id = str(peer_id)
-        
-        self.locked_users.setdefault(chat_id, {})[user] = text
-        self.save_data()
-        BulletinHelper.show_success(f"Добавлен автоответ для @{user}")
-        return True
-
-    def process_unlock_command(self, peer_id, args):
-        if len(args) < 1:
-            BulletinHelper.show_error("Формат: .unlock @user")
-            return False
-            
-        user = args[0].strip('@')
-        chat_id = str(peer_id)
-        
-        if chat_id in self.locked_users and user in self.locked_users[chat_id]:
-            del self.locked_users[chat_id][user]
-            self.save_data()
-            BulletinHelper.show_success(f"Удалён автоответ для @{user}")
-        else:
-            BulletinHelper.show_error("Пользователь не найден")
-        return True
-
-    def process_locklist_command(self, peer_id):
-        chat_id = str(peer_id)
-        if chat_id in self.locked_users and self.locked_users[chat_id]:
-            users = [f"@{u}: {t}" for u, t in self.locked_users[chat_id].items()]
-            BulletinHelper.show_info("Автоответы:\n" + '\n'.join(users))
-        else:
-            BulletinHelper.show_info("Список пуст")
-        return True
-
-    def on_send_message_hook(self, account, params):
+    def process_command(self, command, peer_id, args):
         try:
-            if not hasattr(params, "message"):
-                return HookResult()
-
-            msg = params.message.strip()
+            chat_id = str(peer_id)
             
-            if msg.startswith('.lock '):
-                if self.process_lock_command(params.peer_id, msg.split()[1:]):
-                    params.message = ""
-                    return HookResult(strategy=HookStrategy.MODIFY, params=params)
-                return HookResult(strategy=HookStrategy.CANCEL)
+            if command == "lock" and len(args) >= 2:
+                user = args[0].strip('@')
+                text = ' '.join(args[1:])
+                self.locked_users.setdefault(chat_id, {})[user] = text
+                self.save_data()
+                BulletinHelper.show_success(f"Добавлен ответ для @{user}")
+                return True
                 
-            elif msg.startswith('.unlock '):
-                if self.process_unlock_command(params.peer_id, msg.split()[1:]):
-                    params.message = ""
-                    return HookResult(strategy=HookStrategy.MODIFY, params=params)
-                return HookResult(strategy=HookStrategy.CANCEL)
+            elif command == "unlock" and args:
+                user = args[0].strip('@')
+                if chat_id in self.locked_users and user in self.locked_users[chat_id]:
+                    del self.locked_users[chat_id][user]
+                    self.save_data()
+                    BulletinHelper.show_success(f"Удалён ответ для @{user}")
+                else:
+                    BulletinHelper.show_error("Пользователь не найден")
+                return True
                 
-            elif msg == '.locklist':
-                if self.process_locklist_command(params.peer_id):
-                    params.message = ""
-                    return HookResult(strategy=HookStrategy.MODIFY, params=params)
-                return HookResult(strategy=HookStrategy.CANCEL)
+            elif command == "locklist":
+                users = []
+                if chat_id in self.locked_users:
+                    users = [f"@{u}: {t}" for u, t in self.locked_users[chat_id].items()]
+                BulletinHelper.show_info("Автоответы:\n" + ('\n'.join(users) if users else "Список пуст"))
+                return True
                 
         except Exception as e:
-            log(f"[AutoReply] Command error: {e}")
+            log(f"[AutoReply] Ошибка команды {command}: {e}")
             BulletinHelper.show_error(f"Ошибка: {e}")
         
-        return HookResult()
+        return False
 
-    def on_message_received(self, account, peer_id, sender_id, message):
+    def on_send_message(self, account, peer_id, message):
+        try:
+            msg = message.strip()
+            if msg.startswith('.lock '):
+                if self.process_command("lock", peer_id, msg[6:].split()):
+                    return ""  # Пустое сообщение удалит оригинал
+                    
+            elif msg.startswith('.unlock '):
+                if self.process_command("unlock", peer_id, msg[8:].split()):
+                    return ""
+                    
+            elif msg == '.locklist':
+                if self.process_command("locklist", peer_id, []):
+                    return ""
+                    
+        except Exception as e:
+            log(f"[AutoReply] Ошибка обработки: {e}")
+        
+        return None  # Не изменяем сообщение
+
+    def on_message(self, account, peer_id, sender_id, message):
         try:
             chat_id = str(peer_id)
             user_id = str(sender_id)
@@ -128,7 +113,9 @@ class AutoReplyPlugin(BasePlugin):
                 current_time - self.last_reply_time.get(user_id, 0) > 1.0):
                 
                 self.last_reply_time[user_id] = current_time
-                self.client.send_message(peer_id, self.locked_users[chat_id][user_id], reply_to=message.message_id)
+                return self.locked_users[chat_id][user_id]
                 
         except Exception as e:
-            log(f"[AutoReply] Reply error: {e}")
+            log(f"[AutoReply] Ошибка ответа: {e}")
+        
+        return None
