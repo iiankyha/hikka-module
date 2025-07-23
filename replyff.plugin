@@ -1,3 +1,11 @@
+; metadata
+id = kastyan_autoreply
+name = AutoReply by Kastyan
+version = 0.001
+author = Kastyan
+description = Автоматический ответ на сообщения выбранных пользователей
+
+; code
 import os
 import json
 import time
@@ -6,12 +14,6 @@ from pyrogram.types import Message
 from exteragram import ExteraGramPlugin
 
 class AutoReplyLock(ExteraGramPlugin):
-    id = "kastyan_autoreply"
-    name = "AutoReply by Kastyan"
-    version = "0.001"
-    author = "Kastyan"
-    description = "Автоматический ответ на сообщения выбранных пользователей"
-
     async def on_load(self):
         self.data_file = "kastyan_autoreply.json"
         self.locked_users = {}
